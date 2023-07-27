@@ -1,0 +1,60 @@
+# Real World utf-8 Substitution Example
+
+```elixir
+Mix.install(
+  [
+    {:utf8_sub, path: Path.join(__DIR__, "../"), env: :dev}
+  ],
+  lockfile: :utf8_sub
+)
+
+defmodule Bits do
+  @doc """
+  Prints all 8 bits in a byte
+  """
+  def as_string(binary) do
+    for(<<x::size(1) <- binary>>, do: "#{x}")
+    |> Enum.chunk_every(8)
+    |> Enum.join(" ")
+  end
+
+  @doc """
+  Convenience function for creating tables
+  """
+  def as_headers(binary) do
+    for(<<x::size(1) <- binary>>, do: "#{x}")
+    |> Enum.chunk_every(8)
+    |> Enum.join(" | ")
+  end
+end
+```
+
+## Real World Example
+
+`sample_data/server_list_causing_issues.json` is a JSON response containing 492 game servers. Unfortunately the server at index 398 has an invalid character in its `"name"` field. This makes the response invalid utf-8 and by extension invalid JSON. Hence our JSON library of choice [Jason](https://github.com/michalmuskala/jason) cannot decode it:
+
+```elixir
+j =
+  Path.join(__DIR__, "../sample_data/server_list_causing_issues.json")
+  |> File.read!()
+
+Jason.decode(j)
+```
+
+We can better visualize the issue with a bit of spelunking:
+
+```elixir
+# Derived from investigating the data around byte 167208 :)
+g =
+  String.graphemes(j)
+  |> Enum.slice(166_629..166_655)
+  |> IO.iodata_to_binary()
+  |> IO.inspect(
+    binaries: :as_strings,
+    limit: :infinity,
+    printable_limit: :infinity,
+    width: :infinity
+  )
+```
+
+It's untenable for the entire application to come to grinding halt due to a single bad byte, in the `name` of 1 server, of 492 total.

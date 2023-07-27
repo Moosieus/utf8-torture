@@ -1,0 +1,373 @@
+# Substitution of ill-formed UTF-8 Sequences in Elixir
+
+```elixir
+import Bitwise
+
+Mix.install(
+  [
+    {:utf8_sub, path: Path.join(__DIR__, "../"), env: :dev}
+  ],
+  lockfile: :utf8_sub
+)
+
+defmodule Bits do
+  @doc """
+  Prints all 8 bits in a byte
+  """
+  def as_string(binary) do
+    for(<<x::size(1) <- binary>>, do: "#{x}")
+    |> Enum.chunk_every(8)
+    |> Enum.join(" ")
+  end
+
+  @doc """
+  Convenience function for creating tables
+  """
+  def as_headers(binary) do
+    for(<<x::size(1) <- binary>>, do: "#{x}")
+    |> Enum.chunk_every(8)
+    |> Enum.join(" | ")
+  end
+end
+```
+
+## Preface
+
+Lots of data developers handle on a daily basis is utf-8 encoded. For example:
+
+* The default encoding for HTML files is utf-8.
+* All JSON files are required to be utf-8 encoded.
+* Most e-mails are utf-8 encoded.
+
+In most cases systems exchanging utf-8 encoded text over the internet are free of encoding errors. Sometimes however bad data ends up on the wire, which our applications receive and must handle.
+
+Usually functions that take strings as parameters in Elixir will error out if they're passed invalid utf-8 strings. This is ideal as default behavior as it brings the issue to our attention and prevents our application from proceeding into [undefined behavior](https://en.wikipedia.org/wiki/Undefined_behavior).
+
+**Ideally** we'd track down the bad data to its source and correct it so our application would never encounter the error in the first place. But in the **real world** we're often consuming utf-8 encoded data from external sources beyond our control. Consequently we must work with what we're given.
+
+*For a more concrete example see [Real World Example](real_word_example.livemd).*
+
+## Introducing the Replacement Character "�"
+
+Since our Elixir code can only proceed with valid utf-8 encoded data, we must convert any ill-formed utf-8 code sequences into a valid form our applications can work with.
+
+Omitting lots of discussion for brevity, there's 3 primary concerns:
+
+1. Substitution must not result in the data being interpreted in unintended or insecure ways.
+2. The substitution should be observable in the resulting string.
+3. The resulting string should be consistent with how other applications interpret the same data.
+
+[The Unicode Standard](https://www.unicode.org/versions/Unicode15.0.0/UnicodeStandard-15.0.pdf) provides best practices under the heading **U+FFFD Substitution of Maximal Subparts**. Albeit their guidance is quite wordy... So let's try to break things down.
+
+For starters, a [quick refresher on utf-8](https://www.youtube.com/watch?v=MijmeoH9LT4). *This video's an especially good resource for when you read the following sections and don't understand them :)*
+
+<!-- livebook:{"break_markdown":true} -->
+
+> *D77 **Code unit**:* The minimal bit combination that can represent a unit of encoded text
+> for processing or interchange.
+
+A unit of storage in concept. In the case of utf-8, a single code unit is 8 bits or 1 byte.
+
+```elixir
+# one code unit
+Bits.as_string("A") |> IO.inspect(label: "A")
+# also one code unit
+Bits.as_string("e") |> IO.inspect(label: "e")
+# two code units
+Bits.as_string("é") |> IO.inspect(label: "é")
+# three code units
+Bits.as_string("界") |> IO.inspect(label: "界")
+
+nil
+```
+
+*Note: `IO.inspect("界", label: "界", base: :binary)` is a more idiomatic way to print strings as binaries. I'm using a custom `Bits` module cribbed from [here](https://tiemenwaterreus.com/posts/from-bitstring-to-base2-elixir/) to display all 8 bits.*
+
+<!-- livebook:{"break_markdown":true} -->
+
+> *D78 **Code unit sequence**:* An ordered sequence of one or more code units.
+
+*Informally equivalent to a string in Elixir.*
+
+```elixir
+# 1x code unit sequence
+Bits.as_string("H") |> IO.inspect(label: "H")
+# 5x code unit sequences
+Bits.as_string("Hello") |> IO.inspect(label: "Hello")
+# 9x code unit sequences
+Bits.as_string("Hello, 世界") |> IO.inspect(label: "Hello, 世界")
+
+nil
+```
+
+> *D93a **Unconvertible offset**:* An offset in a code unit sequence for which no code unit sub-sequence starting at that offset is well-formed.
+
+This definition's a bit hard to intuit:
+
+"code unit sequence" -> 1 to 4 bytes in sequence that make up a character
+
+"code unit sub-sequence" -> ...perhaps best described visually:
+
+```elixir
+Bits.as_string("𒀋") |> IO.inspect(label: "if this is a sequence")
+```
+
+## Example Cases
+
+The standard provides helpful examples in tables 3.8 through 3.11, but formats the code units in hexadecimal. I've converted them below for better clarity.
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Table 3-8. U+FFFD for Non-Shortest Form Sequences
+
+<table>
+  <tbody>
+    <tr>
+      <td>Bytes</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11000000</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10101111</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11100000</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10000000</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10111111</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11110000</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10000001</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10000010</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">01000001</td>
+    </tr>
+    <tr>
+      <td>Output</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">A</td>
+    </tr>
+  </tbody>
+</table>
+
+It's technically possible to represent characters with more than the minimum amount of bytes necessary in utf-8. Doing so is called "Non-Shortest Form" and is forbidden. Each byte in a "Non-Shortest Form" sequence should be replaced with the replacement character "�".
+
+The spec refers to them as "Non-Shortest Form", but in online vernacular they're also referred to as "overlong". Here's a [good article](https://kevinboone.me/overlong.html) on the subject.
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### ~~Table 3-9. U+FFFD for Ill-Formed Sequences for Surrogates~~
+
+utf-8 doesn't have "surrogate code points" so we don't need to worry about them. More on that [here](https://stackoverflow.com/questions/51001150/what-are-surrogate-characters-in-utf-8).
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Table 3-10. U+FFFD for Other Ill-Formed Sequences
+
+<table>
+  <tbody>
+    <tr>
+      <td>Bytes</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11110100</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10010001</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10010010</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10010011</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11111111</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">01000001</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">10000000</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">10111111</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">01000010</td>
+    </tr>
+    <tr>
+      <td>Output</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">A</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">B</td>
+    </tr>
+  </tbody>
+</table>
+
+"Other Ill-Formed Sequences" -> Any code point beyond `U+10FFFF` (read: `1,114,111`), and any other byte that does not contribute to a valid sequence.
+
+`U+10FFFF` is the highest possible code point (read: "number") in the unicode standard, so numbers greater than that are invalid. If you're curious what that looks like in bytes, try: `<<1_114_111::utf8>> |> IO.inspect(base: :binary)`.
+
+<!-- livebook:{"break_markdown":true} -->
+
+#### Table 3-11. U+FFFD for Truncated Sequences
+
+<table>
+  <tbody>
+    <tr>
+      <td>Bytes</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11100001</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10000000</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11100010</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11110000</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10010001</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10010010</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">11110001</td>
+      <td class="text-center" style="padding: .75rem .5rem;">10111111</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">01000001</td>
+    </tr>
+    <tr>
+      <td>Output</td>
+      <td colspan="2" class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td colspan="3" class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td colspan="2" class="text-center" style="border-left: 1px solid #ddd; padding: .75rem .5rem;">�</td>
+      <td class="text-center" style="border-left: 1px solid #ddd;padding: .75rem .5rem;">A</td>
+    </tr>
+  </tbody>
+</table>
+
+Only when a sequence of two or three bytes is a truncated version of a sequence which is
+otherwise well-formed to that point, is more than one byte replaced with a single U+FFFD
+
+## Turning that into Elixir code
+
+```elixir
+fn <<_::utf8, rest::binary>> ->
+  IO.inpsect("Valid utf-8, continue")
+  <<rest::binary>>
+end
+
+# 1110xxxx 10xxxxxx | [lead] ->
+fn <<0b1110::4, i::4, 0b10::2, ii::6, n_lead::2, n_rest::6, rest::binary>> when n_lead != 0b10 ->
+  <<tcp::10>> = <<i::4, ii::6>>
+
+  # <<i, ii>> must be a valid truncated 3-byte value
+  cond do
+    tcp >= 32 && tcp <= 863 -> "valid truncated code point (use one U+UFFD)"
+    tcp >= 896 && tcp <= 1023 -> "valid truncated code point (use one U+UFFD)"
+    true -> "invalid truncated code point (use two U+FFFD)"
+  end
+  |> IO.inspect()
+
+  # pass n so it's not consumed
+  <<n_lead::2, n_rest::6, rest::binary>>
+end
+
+# 11110xxx 10xxxxxx | [lead] ->
+fn <<0b11110::5, i::3, 0b10::2, ii::6, n_lead::2, n_rest::6, rest::binary>> when n_lead != 0b10 ->
+  <<tcp::9>> = <<i::3, ii::6>>
+
+  # <<i, ii>> must be a valid truncated 4-byte value
+  case tcp >= 16 && tcp <= 271 do
+    true -> "valid truncated code point (use one U+UFFD)"
+    false -> "invalid truncated code point (use two U+FFFD)"
+  end
+  |> IO.inspect()
+
+  <<n_lead::2, n_rest::6, rest::binary>>
+end
+
+# 11110xxx 10xxxxxx 10xxxxxx | [lead] ->
+fn <<0b11110::5, i::3, 0b10::2, ii::6, 0b10::2, iii::6, n_lead::2, n_rest::6, rest::binary>>
+   when n_lead != 0b10 ->
+  <<tcp::15>> = <<i::3, ii::6, iii::6>>
+
+  # <<i, ii, iii>> must be a valid truncated 4-byte value
+  case tcp >= 1024 && tcp <= 17407 do
+    true -> "valid truncated code point (use one U+UFFD)"
+    false -> "invalid truncated code point (use three U+FFFD)"
+  end
+  |> IO.inspect()
+
+  <<n_lead::2, n_rest::6, rest::binary>>
+end
+
+# Truncated sequences one code unit long match here (same effect).
+# All other cases -> result in one "�" per byte.
+fn <<_::binary-size(1), rest::binary>> ->
+  IO.inspect("replace each byte with �")
+  <<rest::binary>>
+end
+```
+
+## Recap: Primary Concerns
+
+1. Substitution must not result in the data being interpreted in unintended or insecure ways.
+
+   * Substituting of ill-formed sequences this way doesn't alter the interpretation of any other code sequences.
+   * This is more of a [problem in utf-16](https://encoding.spec.whatwg.org/#security-background) due to surrogate code points.
+
+2. The substitution should be visible in the resulting string.
+
+   * Valid but truncated sequences will be visible as a single "�"
+   * All other invalid bytes will be replaced with a "�" each
+
+3. The resulting string should be consistent with how other applications interpret the same data.
+
+   * This method follows The Unicode Standard's guidance.
+   * Independent systems will interpret the same ill-formed data the same way.
+   * This eliminates conditions that could otherwise lead to lots of difficult to trace bugs.
+
+## Scratch Pad of Insanity
+
+```elixir
+# Encode "A" as 4 bytes b/c we're insane
+<<_::5, i::3, _::2, ii::6, _::2, iii::6, _::2, iv::6>> =
+  <<0b11110_000, 0b10_000000, 0b10_000001, 0b10_000001>>
+
+<<a::21>> = <<i::3, ii::6, iii::6, iv::6>>
+IO.inspect(a, label: "\"A\"")
+<<olat::15>> = <<i::3, ii::6, iii::6>>
+IO.inspect(olat, label: "3/4 overlong truncated A")
+
+# 3/4 byte ltcp
+<<_::5, i::3, _::2, ii::6, _::2, iii::6, _::8>> = <<0x10000::utf8>>
+<<ltcp::15>> = <<i::3, ii::6, iii::6>>
+IO.inspect(ltcp, label: "3/4 lowest truncated code point")
+# same as `0x10000 >>> 6`
+
+# 3/4 byte htcp
+<<_::5, i::3, _::2, ii::6, _::2, iii::6, _::8>> = <<0x10FFFD::utf8>>
+<<htcp::15>> = <<i::3, ii::6, iii::6>>
+IO.inspect(htcp, label: "3/4 highest truncated code point")
+# could just do 0x10FFFD >>> 6
+```
+
+## Valid Code Point Ranges, Truncated
+
+If a truncated code sequence's resulting value falls within these ranges, it is properly formed.
+
+```elixir
+# 2/3-byte truncated
+# 32 11100000 10100000 10000000
+0x0800 >>> 6
+# 863
+0xD7FF >>> 6
+# U+D800 - U+DFFF are surrogate code points and not valid utf-8
+# 896
+0xE000 >>> 6
+# 1023
+0x10000 >>> 6
+
+# 3/4-byte truncated
+# 1024 (min possible code point for 4-byte sequences)
+0x10000 >>> 6
+# 17407 (max possible code point defined by Unicode)
+0x10FFFD >>> 6
+
+# 2/4-byte truncated (same as above but truncate an extra byte)
+# 16
+0x10000 >>> 12
+# 271 
+0x10FFFD >>> 12
+
+nil
+```
+
+The right-ward bitshift `>>> 6` may be expressed in layman terms as "drop the right-most 6 bits". This is equivalent to that code point's value being truncated, which we can compare against.
+
+```elixir
+0x0800 |> IO.inspect(base: :binary)
+0x0800 >>> 6 |> IO.inspect(base: :binary)
+
+nil
+```
