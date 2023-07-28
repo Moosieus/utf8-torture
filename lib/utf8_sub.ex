@@ -12,6 +12,8 @@ defmodule UTF8Sub.Naive do
 end
 
 defmodule UTF8Sub.Simple do
+  @dialyzer(:no_improper_lists)
+
   @moduledoc """
   Replace malformed utf8 characters by building a new string, replacing any bad characters.
   """
@@ -41,6 +43,8 @@ defmodule UTF8Sub.Fast do
   @moduledoc """
   Replaces malformed utf8 characters by indexing bad characters and slicing around them.
   """
+
+  @dialyzer(:no_improper_lists)
 
   def replace_bad_chars(""), do: ""
 
