@@ -1,4 +1,4 @@
-# There's definitely far better ways to do this.
+# Post morterm: There's absolutely a better way to do this. Far as I can tell though, this works.
 
 defmodule UTF8Sub do
   @dialyzer(:no_improper_lists)
