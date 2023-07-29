@@ -93,32 +93,32 @@ defmodule UTF8Sub do
 
   # single bad sequence at end, short circuit
   defp replace_bad_sequences([0], s, r) do
-    binary_slice(s, -byte_size(s)-1..-2) <> r
+    binary_slice(s, -byte_size(s)-1..-2//1) <> r
   end
 
   defp replace_bad_sequences([{i, 0}], s, r) do
-    binary_slice(s, -byte_size(s)-1..-(i+2)) <> r
+    binary_slice(s, -byte_size(s)-1..-(i+2)//1) <> r
   end
 
   # single bad sequence in middle, short circuit
   defp replace_bad_sequences([i], s, r) when is_integer(i) do
-    binary_slice(s, -byte_size(s)-1..-(i+2)) <> r <> binary_slice(s, -i..-1)
+    binary_slice(s, -byte_size(s)-1..-(i+2)) <> r <> binary_slice(s, -i..-1//1)
   end
 
   defp replace_bad_sequences([{i, ii}], s, r) do
-    binary_slice(s, -byte_size(s)-1..-(i+2)) <> r <> binary_slice(s, -ii..-1)
+    binary_slice(s, -byte_size(s)-1..-(i+2)) <> r <> binary_slice(s, -ii..-1//1)
   end
 
   # several bad sequences, use recursive strategy
 
   # recursive loop slices what's "behind" each bad sequence, so a leading bad sequence is an edge case.
   defp replace_bad_sequences([i | _rest] = b, s, r) when is_integer(i) and i+1 !== byte_size(s) do
-    [binary_slice(s, -byte_size(s)..-(i+2))]
+    [binary_slice(s, -byte_size(s)..-(i+2)//1)]
     |> do_replace_bad_sequences(b, s, r)
   end
 
   defp replace_bad_sequences([{i, _ii} | _rest] = b, s, r) when i+1 !== byte_size(s) do
-    [binary_slice(s, -byte_size(s)..-(i+2))]
+    [binary_slice(s, -byte_size(s)..-(i+2)//1)]
     |> do_replace_bad_sequences(b, s, r)
   end
 
@@ -129,7 +129,6 @@ defmodule UTF8Sub do
   # loop
 
   # last bad sequence
-
   defp do_replace_bad_sequences(acc, [0], _s, r) do
     [acc | r]
     |> IO.iodata_to_binary()
@@ -141,24 +140,23 @@ defmodule UTF8Sub do
   end
 
   defp do_replace_bad_sequences(acc, [i], s, r) when is_integer(i) do
-    [[acc | r] | binary_slice(s, -i..-1)]
+    [[acc | r] | binary_slice(s, -i..-1//1)]
     |> IO.iodata_to_binary()
   end
 
   defp do_replace_bad_sequences(acc, [{_i, ii}], s, r) do
-    [[acc | r] | binary_slice(s, -ii..-1)]
+    [[acc | r] | binary_slice(s, -ii..-1//1)]
     |> IO.iodata_to_binary()
   end
 
   # middle bad sequence(s)
-
   defp do_replace_bad_sequences(acc, [{_i, i} | [{ii, _} | _] = rest], s, r) when i+1 === ii do
     [acc | r]
     |> do_replace_bad_sequences(rest, s, r)
   end
 
   defp do_replace_bad_sequences(acc, [{_i, i} | [{ii, _} | _] = rest], s, r) do
-    [[acc | r] | binary_slice(s, -i..-(ii+2))]
+    [[acc | r] | binary_slice(s, -i..-(ii+2)//1)]
     |> do_replace_bad_sequences(rest, s, r)
   end
 
@@ -168,7 +166,7 @@ defmodule UTF8Sub do
   end
 
   defp do_replace_bad_sequences(acc, [{_, i} | [ii | _] = rest], s, r) when is_integer(ii) do
-    [[acc | r] | binary_slice(s, -i..-(ii+2))]
+    [[acc | r] | binary_slice(s, -i..-(ii+2)//1)]
     |> do_replace_bad_sequences(rest, s, r)
   end
 
@@ -178,7 +176,7 @@ defmodule UTF8Sub do
   end
 
   defp do_replace_bad_sequences(acc, [i | [{ii, _} | _] = rest], s, r) when is_integer(i) do
-    [[acc | r] | binary_slice(s, -i..-(ii+2))]
+    [[acc | r] | binary_slice(s, -i..-(ii+2)//1)]
     |> do_replace_bad_sequences(rest, s, r)
   end
 
@@ -188,7 +186,7 @@ defmodule UTF8Sub do
   end
 
   defp do_replace_bad_sequences(acc, [i | [ii | _] = rest], s, r) when is_integer(i) and is_integer(ii) do
-    [[acc | r] | binary_slice(s, -i..-(ii+2))]
+    [[acc | r] | binary_slice(s, -i..-(ii+2)//1)]
     |> do_replace_bad_sequences(rest, s, r)
   end
 end
