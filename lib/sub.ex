@@ -1,6 +1,14 @@
 defmodule UTF8Sub do
   @dialyzer(:no_improper_lists)
 
+  @doc """
+  Replaces ill-formed utf-8 subsequences (read: invalid bytes) according to Unicode Standard best practices.
+
+  This is particularly desirable when separate systems must handle the same ill-formed utf-8 data and agree on the contents.
+
+  An alternative replacement to code point U+FFFD may be provided as an optional second argument.
+  """
+  @spec sub(binary, binary) :: binary
   def sub(bytes, replacement \\ "�")
 
   def sub(<<>>, _), do: ""
@@ -98,7 +106,7 @@ defmodule UTF8Sub do
 
   # several bad sequences, use recursive strategy
 
-  # recursive loop will always slice what's "behind" each bad sequence, so the start is an edge case
+  # recursive loop slices what's "behind" each bad sequence, so a leading bad sequence is an edge case.
   defp replace_bad_sequences([i | rest], s, r) when is_integer(i) and i+1 !== byte_size(s) do
     do_replace_bad_sequences(s, r, [i | rest], [binary_slice(s, -byte_size(s)..-(i+2))])
   end
